@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -15,6 +17,14 @@ from .models import User, Checkin, Reminder
 from .i18n import t
 from .llm import analyze_checkin, detect_crisis
 from .utils import parse_time_hhmm, today_start_in_tz, to_utc
+
+
+class ConsentStates(StatesGroup):
+    waiting = State()
+
+
+class RemindersStates(StatesGroup):
+    waiting = State()
 
 
 class CheckinStates(StatesGroup):
@@ -38,6 +48,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
 
     await message.answer(t('start_welcome', locale))
     await message.answer(t('disclaimer', locale))
+    await state.set_state(ConsentStates.waiting)
     await message.answer(t('consent_request', locale))
 
 
@@ -49,8 +60,10 @@ async def consent_handler(message: Message, state: FSMContext, session: AsyncSes
     if text in {"да", "согласен", "согласна", "yes", "agree"}:
         user.consent_given = True
         await session.commit()
+        await state.clear()
         await message.answer(t('consent_yes', locale))
     else:
+        await state.clear()
         await message.answer(t('consent_no', locale))
 
 
@@ -84,6 +97,7 @@ async def cmd_reminders(message: Message, state: FSMContext, session: AsyncSessi
     result = await session.execute(select(User).where(User.tg_user_id == message.from_user.id))
     user = result.scalar_one_or_none()
     locale = user.language_code or 'ru'
+    await state.set_state(RemindersStates.waiting)
     await message.answer(
         t('reminder_set', locale) + "\n" +
         "Отправьте список времени (HH:MM, через запятую) и при необходимости укажите часовой пояс (например, Europe/Moscow)."
@@ -117,6 +131,7 @@ async def reminders_text(message: Message, state: FSMContext, session: AsyncSess
         rem.enabled = True
     user.timezone = tz
     await session.commit()
+    await state.clear()
     await message.answer(t('reminder_set', locale))
 
 
@@ -272,8 +287,8 @@ async def cmd_export(message: Message, state: FSMContext, session: AsyncSession)
             "recs": r.recommendations,
         } for r in rows
     ]
-    data = orjson.dumps(payload).decode()
-    await message.answer_document(document=("export.json", data))
+    data = orjson.dumps(payload)
+    await message.answer_document(document=BufferedInputFile(data, filename="export.json"))
 
 
 async def cmd_delete_me(message: Message, state: FSMContext, session: AsyncSession):
@@ -291,8 +306,11 @@ def setup_routes(dp: Dispatcher):
     dp.message.register(cmd_help, Command(commands=["help"]))
     dp.message.register(cmd_lang, Command(commands=["lang"]))
     dp.message.register(cmd_settings, Command(commands=["settings"]))
+
+    dp.message.register(consent_handler, ConsentStates.waiting)
+
     dp.message.register(cmd_reminders, Command(commands=["reminders"]))
-    dp.message.register(reminders_text, F.text, Command(commands=[]))
+    dp.message.register(reminders_text, RemindersStates.waiting)
 
     dp.message.register(cmd_checkin, Command(commands=["checkin"]))
     dp.message.register(mood_handler, CheckinStates.mood)
@@ -307,6 +325,24 @@ def setup_routes(dp: Dispatcher):
     dp.message.register(cmd_delete_me, Command(commands=["delete_me"]))
 
 
+async def health(request):
+    return web.Response(text="ok")
+
+async def index(request):
+    return web.Response(text="MindCheck bot running")
+
+async def run_http_server():
+    app = web.Application()
+    app.add_routes([web.get('/', index), web.get('/healthz', health)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', '10000'))
+    site = web.TCPSite(runner, host='0.0.0.0', port=port)
+    await site.start()
+    while True:
+        await asyncio.sleep(3600)
+
+
 async def main():
     bot = Bot(token=settings.bot_token, parse_mode="HTML")
     dp = Dispatcher()
@@ -319,7 +355,10 @@ async def main():
             return await handler(event, data)
 
     setup_routes(dp)
-    await dp.start_polling(bot)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        run_http_server(),
+    )
 
 
 if __name__ == "__main__":
