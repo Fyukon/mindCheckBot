@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: mindcheck-bot
+    env: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: python -m src.bot
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: deepseek/deepseek-chat
+      - key: DEFAULT_TZ
+        value: Europe/Moscow
+      - key: DEFAULT_CHECKIN_TIME
+        value: "18:00"

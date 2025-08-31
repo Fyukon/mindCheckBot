@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+.env
+.env.*
+.idea/
+.vscode/
+.mypy_cache/
+.pytest_cache/
+
+# Alembic
+alembic.ini
+alembic/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store

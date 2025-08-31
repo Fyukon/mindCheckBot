@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "mindcheck-bot"
+version = "0.1.0"
+description = "Telegram bot for daily emotional check-ins with AI analysis"
+requires-python = ">=3.11"
