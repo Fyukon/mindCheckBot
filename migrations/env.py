@@ -11,7 +11,18 @@ config = context.config
 # Inject DB URL if not set
 if not config.get_main_option("sqlalchemy.url"):
     # Alembic needs sync driver
-    sync_url = settings.database_url.replace('+asyncpg', '')
+    # Accept postgres:// and postgresql://
+    url = settings.database_url
+    if url.startswith("postgres+asyncpg://"):
+        sync_url = url.replace("+asyncpg", "")
+    elif url.startswith("postgres://"):
+        sync_url = "postgresql://" + url[len("postgres://"):]
+    elif url.startswith("postgresql+asyncpg://"):
+        sync_url = "postgresql://" + url[len("postgresql+asyncpg://"):]
+    else:
+        sync_url = url
+    if "PORT" in sync_url:
+        raise RuntimeError("Invalid DATABASE_URL in env: contains 'PORT' placeholder. Replace with numeric port.")
     config.set_main_option("sqlalchemy.url", sync_url)
 
 if config.config_file_name is not None:
