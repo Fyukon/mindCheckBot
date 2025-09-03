@@ -5,7 +5,11 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMCon / text
+from aiogram.fsm.context import FSMCon
+from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
@@ -359,7 +363,6 @@ async def main():
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
-    dp = Dispatcher()
 
     # Middleware to inject DB session per message
     @dp.update.outer_middleware()
