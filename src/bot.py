@@ -5,11 +5,14 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
+from aiogram.fsm.context import FSMCon / text
+
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from .config import settings
 from .db import get_session, engine
@@ -207,6 +210,7 @@ async def notes_handler(message: Message, state: FSMContext, session: AsyncSessi
         date=date_local,
         notes=data.get('notes'),
     )
+
     # naive parse for numbers
     def extract_score(s: str) -> int | None:
         try:
@@ -214,6 +218,7 @@ async def notes_handler(message: Message, state: FSMContext, session: AsyncSessi
             return nums[0] if nums else None
         except Exception:
             return None
+
     checkin.mood_score = extract_score(data.get('mood', ''))
     checkin.stress_score = extract_score(data.get('stress', ''))
     checkin.energy_score = extract_score(data.get('energy', ''))
@@ -232,11 +237,14 @@ async def notes_handler(message: Message, state: FSMContext, session: AsyncSessi
     await message.answer(t('checkin_saved', locale))
 
     # Crisis detection quick path
-    full_text = "\n".join([data.get('mood',''), data.get('stress',''), data.get('energy',''), data.get('emotions',''), data.get('sleep',''), data.get('notes','')])
+    full_text = "\n".join(
+        [data.get('mood', ''), data.get('stress', ''), data.get('energy', ''), data.get('emotions', ''),
+         data.get('sleep', ''), data.get('notes', '')])
     if detect_crisis(full_text):
         await message.answer(t('crisis_detected', locale))
         # Provide minimal resources (RU-focused)
-        await message.answer("Если вы в опасности — звоните 112. Линия доверия: 8-800-2000-122. Обратитесь к близким/специалисту.")
+        await message.answer(
+            "Если вы в опасности — звоните 112. Линия доверия: 8-800-2000-122. Обратитесь к близким/специалисту.")
 
     # LLM analysis
     analysis = await analyze_checkin(
@@ -264,7 +272,8 @@ async def cmd_stats(message: Message, state: FSMContext, session: AsyncSession):
         return
     lines = []
     for r in rows:
-        lines.append(f"{r.date.date()}: mood={r.mood_score}, stress={r.stress_score}, energy={r.energy_score}; sleep={r.sleep_hours}; notes={(r.notes or '')[:50]}")
+        lines.append(
+            f"{r.date.date()}: mood={r.mood_score}, stress={r.stress_score}, energy={r.energy_score}; sleep={r.sleep_hours}; notes={(r.notes or '')[:50]}")
     await message.answer(t('stats_title', locale) + "\n" + "\n".join(lines))
 
 
@@ -328,8 +337,10 @@ def setup_routes(dp: Dispatcher):
 async def health(request):
     return web.Response(text="ok")
 
+
 async def index(request):
     return web.Response(text="MindCheck bot running")
+
 
 async def run_http_server():
     app = web.Application()
@@ -344,7 +355,10 @@ async def run_http_server():
 
 
 async def main():
-    bot = Bot(token=settings.bot_token, parse_mode="HTML")
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
 
     # Middleware to inject DB session per message
