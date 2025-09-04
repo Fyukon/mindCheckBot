@@ -14,13 +14,12 @@ from aiohttp import web
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
-from db import Base
-from db import get_session, engine
-from i18n import t
-from llm import analyze_checkin, detect_crisis
-from models import User, Checkin, Reminder
-from utils import parse_time_hhmm, today_start_in_tz
+from src.config import settings
+from src.db import get_session, engine
+from src.models import User, Checkin, Reminder
+from src.i18n import t
+from src.llm import analyze_checkin, detect_crisis
+from src.utils import parse_time_hhmm, today_start_in_tz, to_utc
 
 
 class ConsentStates(StatesGroup):

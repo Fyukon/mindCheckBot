@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config import settings
+from .config import settings
 
 SAFETY_SYSTEM_PROMPT = (
     "You are a professional, empathetic mental health coach. \n"
