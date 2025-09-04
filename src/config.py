@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # OpenRouter
     openrouter_api_key: str | None = Field(None, alias='OPENROUTER_API_KEY')
-    openrouter_model: str = Field("deepseek/deepseek-chat", alias='OPENROUTER_MODEL')
+    openrouter_model: str = Field("deepseek/deepseek-chat-v3.1:free", alias='OPENROUTER_MODEL')
 
     # App
     default_timezone: str = Field("Europe/Moscow", alias='DEFAULT_TZ')

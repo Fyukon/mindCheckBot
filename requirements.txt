@@ -8,5 +8,5 @@ aiohttp==3.9.5
 pydantic-settings==2.4.0
 python-dotenv==1.0.1
 orjson==3.10.7
-uvloop==0.20.0
+uvloop==0.20.0; sys_platform != 'win32'
 pytz==2024.1

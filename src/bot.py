@@ -1,30 +1,26 @@
 from __future__ import annotations
+
 import asyncio
 import os
-from aiohttp import web
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, BufferedInputFile
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram import Bot, Dispatcher, F
-from aiogram import Bot, Dispatcher, F
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-
-
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.types import Message, BufferedInputFile
+from aiohttp import web
 from sqlalchemy import select, delete
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import settings
-from .db import get_session, engine
-from .models import User, Checkin, Reminder
-from .i18n import t
-from .llm import analyze_checkin, detect_crisis
-from .utils import parse_time_hhmm, today_start_in_tz, to_utc
+from config import settings
+from db import Base
+from db import get_session, engine
+from i18n import t
+from llm import analyze_checkin, detect_crisis
+from models import User, Checkin, Reminder
+from utils import parse_time_hhmm, today_start_in_tz
 
 
 class ConsentStates(StatesGroup):
@@ -200,23 +196,30 @@ async def sleep_handler(message: Message, state: FSMContext, session: AsyncSessi
 
 
 async def notes_handler(message: Message, state: FSMContext, session: AsyncSession, bot: Bot):
+    # пользователь и локаль
     result = await session.execute(select(User).where(User.tg_user_id == message.from_user.id))
     user = result.scalar_one_or_none()
     locale = user.language_code or 'ru'
 
+    # собрать ответы и очистить стейт
     await state.update_data(notes=message.text or '')
     data = await state.get_data()
     await state.clear()
 
-    # Save checkin
-    date_local = today_start_in_tz(user.timezone)
-    checkin = Checkin(
-        user_id=user.id,
-        date=date_local,
-        notes=data.get('notes'),
-    )
+    # дата "сегодня" по таймзоне пользователя — делаем naive под TIMESTAMP WITHOUT TIME ZONE
+    date_local = today_start_in_tz(user.timezone)      # aware
+    date_naive = date_local.replace(tzinfo=None)       # naive
 
-    # naive parse for numbers
+    # найти чек-ин на сегодня; если нет — создать
+    q = await session.execute(
+        select(Checkin).where(Checkin.user_id == user.id, Checkin.date == date_naive)
+    )
+    checkin = q.scalar_one_or_none()
+    if checkin is None:
+        checkin = Checkin(user_id=user.id, date=date_naive)
+        session.add(checkin)
+
+    # наивный парсер чисел
     def extract_score(s: str) -> int | None:
         try:
             nums = [int(x) for x in s.split() if x.isdigit()]
@@ -224,34 +227,33 @@ async def notes_handler(message: Message, state: FSMContext, session: AsyncSessi
         except Exception:
             return None
 
+    # проставить поля
+    checkin.notes = data.get('notes')
     checkin.mood_score = extract_score(data.get('mood', ''))
     checkin.stress_score = extract_score(data.get('stress', ''))
     checkin.energy_score = extract_score(data.get('energy', ''))
     checkin.emotions = data.get('emotions')
 
-    # sleep hours
     try:
         sh = [x for x in (data.get('sleep') or '').replace(',', '.').split() if x.replace('.', '', 1).isdigit()]
         checkin.sleep_hours = int(float(sh[0])) if sh else None
     except Exception:
         checkin.sleep_hours = None
 
-    session.add(checkin)
+    # сохранить базовые данные
     await session.commit()
-
     await message.answer(t('checkin_saved', locale))
 
-    # Crisis detection quick path
-    full_text = "\n".join(
-        [data.get('mood', ''), data.get('stress', ''), data.get('energy', ''), data.get('emotions', ''),
-         data.get('sleep', ''), data.get('notes', '')])
+    # быстрая проверка кризиса
+    full_text = "\n".join([
+        data.get('mood', ''), data.get('stress', ''), data.get('energy', ''),
+        data.get('emotions', ''), data.get('sleep', ''), data.get('notes', '')
+    ])
     if detect_crisis(full_text):
         await message.answer(t('crisis_detected', locale))
-        # Provide minimal resources (RU-focused)
-        await message.answer(
-            "Если вы в опасности — звоните 112. Линия доверия: 8-800-2000-122. Обратитесь к близким/специалисту.")
+        await message.answer("Если вы в опасности — звоните 112. Линия доверия: 8-800-2000-122.")
 
-    # LLM analysis
+    # LLM-анализ (с твоим фолбэком в llm.py)
     analysis = await analyze_checkin(
         f"User locale={locale}, timezone={user.timezone}. Daily check-in raw data: {data}.\n"
         "Provide: 1) brief empathetic summary; 2) 2–4 actionable, low-risk recommendations aligned with CBT/ACT/mindfulness; 3) encourage self-reflection; 4) no diagnoses.",
@@ -262,6 +264,7 @@ async def notes_handler(message: Message, state: FSMContext, session: AsyncSessi
     await session.commit()
 
     await message.answer(t('analysis_ready', locale) + "\n\n" + analysis)
+
 
 
 async def cmd_stats(message: Message, state: FSMContext, session: AsyncSession):
@@ -339,6 +342,11 @@ def setup_routes(dp: Dispatcher):
     dp.message.register(cmd_delete_me, Command(commands=["delete_me"]))
 
 
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 async def health(request):
     return web.Response(text="ok")
 
@@ -365,14 +373,19 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
-    # Middleware to inject DB session per message
-    @dp.update.outer_middleware()
+    dp = Dispatcher()  # <-- обязательно
+    await init_db()
+
+    # Middleware: кладём AsyncSession в data["session"]
     async def db_session_mw(handler, event, data):
         async for session in get_session():
             data["session"] = session
             return await handler(event, data)
 
+    dp.update.outer_middleware(db_session_mw)  # <-- регистрируем, не декоратором
+
     setup_routes(dp)
+
     await asyncio.gather(
         dp.start_polling(bot),
         run_http_server(),

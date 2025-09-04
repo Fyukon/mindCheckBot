@@ -2,7 +2,7 @@ from __future__ import annotations
 from sqlalchemy import BigInteger, String, Integer, DateTime, Text, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from .db import Base
+from db import Base
 
 
 class User(Base):
