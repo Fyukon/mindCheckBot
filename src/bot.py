@@ -15,7 +15,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.db import get_session, engine
+from src.db import get_session, engine, Base
 from src.models import User, Checkin, Reminder
 from src.i18n import t
 from src.llm import analyze_checkin, detect_crisis
