@@ -3,11 +3,20 @@ from __future__ import annotations
 from .config import settings
 
 SAFETY_SYSTEM_PROMPT = (
-    "You are a professional, empathetic mental health coach. \n"
-    "Goals: help self-reflection, awareness, and daily check-ins. \n"
-    "Rules: do NOT diagnose; avoid clinical terms; never give harmful or high-risk advice; \n"
-    "encourage seeking professional help if needed; keep responses concise but supportive; \n"
-    "ask clarifying questions only when necessary. \n"
+    "You are a professional, empathetic mental health coach.\n"
+    "Goals: help self-reflection, awareness, and daily check-ins.\n"
+    "Rules: do NOT diagnose; avoid clinical terms; never give harmful or high-risk advice;\n"
+    "encourage seeking professional help if needed; keep responses concise but supportive;\n"
+    "ask clarifying questions only when necessary.\n"
+)
+
+CHAT_SYSTEM_PROMPT = (
+    SAFETY_SYSTEM_PROMPT
+    + "\n"
+    "You will chat about the user's day: mood, stress, energy, sleep, emotions, notes.\n"
+    "Be brief, practical (2–4 steps), and supportive. Suggest low-risk actions only "
+    "(sleep hygiene, breathing, journaling, gentle movement, social support, planning). "
+    "Avoid any diagnosis or medical claims. If crisis indicators appear, recommend seeking immediate help."
 )
 
 CRISIS_KEYWORDS = [
@@ -60,6 +69,42 @@ async def analyze_checkin(text: str, locale: str = "ru") -> str:
     except RequestError:
         return (
             "Краткий разбор (без LLM): сеть недоступна." if locale == "ru" else "Brief analysis (no LLM): network error.")
+
+
+async def chat(messages: list[dict], locale: str = "ru") -> str:
+    """
+    messages: [{"role":"user"|"assistant"|"system","content": "..."}]
+    Always prepend CHAT_SYSTEM_PROMPT yourself if needed (this function does it as well).
+    """
+    if not settings.openrouter_api_key:
+        # Фолбэк без внешних вызовов
+        last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+        base = "Краткий ответ (без LLM): " if locale == "ru" else "Brief reply (no LLM): "
+        return base + (last_user[:400] or "Опишите свой день — настроение, стресс, энергия, сон, эмоции, планы.")
+
+    headers = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Fyukon/mindCheckBot",
+        "X-Title": "MindCheckBot",
+    }
+    full_messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}] + messages
+    payload = {
+        "model": settings.openrouter_model,
+        "messages": full_messages,
+        "temperature": 0.6,
+        "max_tokens": 500,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(OPENROUTER_URL, headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content")
+            return content or ("Не удалось получить ответ от модели." if locale == "ru" else "Failed to get model response.")
+    except (HTTPStatusError, RequestError):
+        return ("Сервис недоступен. Попробуйте позже." if locale == "ru" else "Service unavailable. Try again later.")
 
 
 def detect_crisis(text: str) -> bool:
